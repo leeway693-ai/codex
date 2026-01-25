@@ -1300,6 +1300,7 @@ impl App {
                             &path,
                             CwdPromptAction::Resume,
                             true,
+                            false,
                         )
                         .await?
                         {
