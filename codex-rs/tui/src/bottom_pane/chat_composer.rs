@@ -2058,33 +2058,6 @@ impl ChatComposer {
             return None;
         }
 
-        if let Some((name, rest, rest_offset)) = parse_slash_name(&text)
-            && !rest.is_empty()
-            && !name.contains('/')
-            && let Some(cmd) = slash_commands::find_builtin_command(
-                name,
-                self.collaboration_modes_enabled,
-                self.connectors_enabled,
-                self.personality_command_enabled,
-                self.windows_degraded_sandbox_active,
-            )
-            && matches!(cmd, SlashCommand::Fork | SlashCommand::Review)
-        {
-            let mut args_elements = Self::slash_command_args_elements(
-                rest,
-                rest_offset,
-                &self.textarea.text_elements(),
-            );
-            let trimmed_rest = rest.trim();
-            args_elements = Self::trim_text_elements(rest, trimmed_rest, args_elements);
-            self.textarea.set_text_clearing_elements("");
-            return Some(InputResult::CommandWithArgs(
-                cmd,
-                trimmed_rest.to_string(),
-                args_elements,
-            ));
-        }
-
         let (name, rest, rest_offset) = parse_slash_name(&text)?;
         if rest.is_empty() || name.contains('/') {
             return None;

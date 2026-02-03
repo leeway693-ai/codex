@@ -1488,10 +1488,10 @@ impl App {
                                         placement,
                                     )
                                     .await
-                                {
-                                    tui.frame_requester().schedule_frame();
-                                    return Ok(AppRunControl::Continue);
-                                }
+                            {
+                                tui.frame_requester().schedule_frame();
+                                return Ok(AppRunControl::Continue);
+                            }
                             self.shutdown_current_thread().await;
                             let init = self.chatwidget_init_for_forked_or_resumed_thread(
                                 tui,
