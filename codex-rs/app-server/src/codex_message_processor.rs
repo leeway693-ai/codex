@@ -151,6 +151,7 @@ use codex_core::SessionMeta;
 use codex_core::ThreadConfigSnapshot;
 use codex_core::ThreadManager;
 use codex_core::ThreadSortKey as CoreThreadSortKey;
+use codex_core::auth::AuthMode as CoreAuthMode;
 use codex_core::auth::CLIENT_ID;
 use codex_core::auth::login_with_api_key;
 use codex_core::auth::login_with_chatgpt_auth_tokens;
@@ -1288,8 +1289,9 @@ impl CodexMessageProcessor {
         }
 
         let account = match self.auth_manager.auth_cached() {
-            Some(auth) => {
-                if auth.is_chatgpt_auth() {
+            Some(auth) => match auth.auth_mode() {
+                CoreAuthMode::ApiKey => Some(Account::ApiKey {}),
+                CoreAuthMode::Chatgpt => {
                     let email = auth.get_account_email();
                     let plan_type = auth.account_plan_type();
 
@@ -1309,10 +1311,8 @@ impl CodexMessageProcessor {
                             return;
                         }
                     }
-                } else {
-                    Some(Account::ApiKey {})
                 }
-            }
+            },
             None => None,
         };
 
