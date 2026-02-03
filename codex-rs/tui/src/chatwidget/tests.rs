@@ -1299,9 +1299,9 @@ async fn submit_user_message_with_mode_errors_when_mode_changes_during_running_t
     chat.set_collaboration_mask(plan_mask);
     chat.on_task_started();
 
-    let code_mode = collaboration_modes::code_mask(chat.models_manager.as_ref())
-        .expect("expected code collaboration mode");
-    chat.submit_user_message_with_mode("Implement the plan.".to_string(), code_mode);
+    let default_mode = collaboration_modes::default_mask(chat.models_manager.as_ref())
+        .expect("expected default collaboration mode");
+    chat.submit_user_message_with_mode("Implement the plan.".to_string(), default_mode);
 
     assert_eq!(chat.active_collaboration_mode_kind(), ModeKind::Plan);
     assert!(chat.queued_user_messages.is_empty());
@@ -1358,24 +1358,23 @@ async fn submit_user_message_with_mode_submits_when_plan_stream_is_not_active() 
             .expect("expected plan collaboration mask");
     chat.set_collaboration_mask(plan_mask);
 
-    let code_mode = collaboration_modes::code_mask(chat.models_manager.as_ref())
-        .expect("expected code collaboration mode");
-    chat.submit_user_message_with_mode("Implement the plan.".to_string(), code_mode);
+    let default_mode = collaboration_modes::default_mask(chat.models_manager.as_ref())
+        .expect("expected default collaboration mode");
+    let expected_mode = default_mode
+        .mode
+        .expect("expected default collaboration mode kind");
+    chat.submit_user_message_with_mode("Implement the plan.".to_string(), default_mode);
 
-    assert_eq!(chat.active_collaboration_mode_kind(), ModeKind::Code);
+    assert_eq!(chat.active_collaboration_mode_kind(), expected_mode);
     assert!(chat.queued_user_messages.is_empty());
     match next_submit_op(&mut op_rx) {
         Op::UserTurn {
-            collaboration_mode:
-                Some(CollaborationMode {
-                    mode: ModeKind::Code,
-                    ..
-                }),
+            collaboration_mode: Some(CollaborationMode { mode, .. }),
             personality: None,
             ..
-        } => {}
+        } => assert_eq!(mode, expected_mode),
         other => {
-            panic!("expected Op::UserTurn with code collab mode, got {other:?}")
+            panic!("expected Op::UserTurn with default collab mode, got {other:?}")
         }
     }
 }
