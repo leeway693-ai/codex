@@ -3318,6 +3318,12 @@ impl ChatWidget {
         }
 
         if let Some(mask) = collaboration_mode_override {
+            if self.agent_turn_running && self.active_collaboration_mask.as_ref() != Some(&mask) {
+                self.add_error_message(
+                    "Cannot switch collaboration mode while a turn is running.".to_string(),
+                );
+                return;
+            }
             self.set_collaboration_mask(mask);
         }
         let effective_mode = self.effective_collaboration_mode();
@@ -5889,13 +5895,6 @@ impl ChatWidget {
         text: String,
         collaboration_mode: CollaborationModeMask,
     ) {
-        if self.agent_turn_running {
-            self.add_error_message(
-                "Cannot submit a mode-switched message while a turn is running.".to_string(),
-            );
-            return;
-        }
-
         let should_queue = self.is_plan_streaming_in_tui();
         let user_message = UserMessage {
             text,
