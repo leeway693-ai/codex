@@ -530,6 +530,8 @@ pub(crate) struct ChatWidget {
     suppress_session_configured_redraw: bool,
     // User messages queued while a turn is in progress
     queued_user_messages: VecDeque<UserMessage>,
+    // Optional mode override associated with the current composer draft.
+    composer_collaboration_mode_override: Option<CollaborationModeMask>,
     // Pending notification to show when unfocused on next Draw
     pending_notification: Option<Notification>,
     /// When `Some`, the user has pressed a quit shortcut and the second press
@@ -1411,16 +1413,7 @@ impl ChatWidget {
         }
 
         if let Some(combined) = self.drain_queued_messages_for_restore() {
-            let combined_local_image_paths = combined
-                .local_images
-                .iter()
-                .map(|img| img.path.clone())
-                .collect();
-            self.bottom_pane.set_composer_text(
-                combined.text,
-                combined.text_elements,
-                combined_local_image_paths,
-            );
+            self.restore_user_message_to_composer(combined);
             self.refresh_queued_user_messages();
         }
 
@@ -1461,6 +1454,8 @@ impl ChatWidget {
         };
         let mut combined_offset = 0usize;
         let mut next_image_label = 1usize;
+        let mut combined_collaboration_mode_override = None;
+        let mut has_conflicting_mode_overrides = false;
 
         for (idx, message) in to_merge.into_iter().enumerate() {
             if idx > 0 {
@@ -1468,6 +1463,15 @@ impl ChatWidget {
                 combined_offset += 1;
             }
             let message = remap_placeholders_for_message(message, &mut next_image_label);
+            if let Some(mask) = &message.collaboration_mode_override {
+                if let Some(existing) = &combined_collaboration_mode_override
+                    && existing != mask
+                {
+                    has_conflicting_mode_overrides = true;
+                } else if combined_collaboration_mode_override.is_none() {
+                    combined_collaboration_mode_override = Some(mask.clone());
+                }
+            }
             let base = combined_offset;
             combined.text.push_str(&message.text);
             combined_offset += message.text.len();
@@ -1481,8 +1485,29 @@ impl ChatWidget {
             combined.local_images.extend(message.local_images);
             combined.mention_paths.extend(message.mention_paths);
         }
+        if !has_conflicting_mode_overrides {
+            combined.collaboration_mode_override = combined_collaboration_mode_override;
+        }
 
         Some(combined)
+    }
+
+    fn take_composer_collaboration_mode_override(&mut self) -> Option<CollaborationModeMask> {
+        self.composer_collaboration_mode_override.take()
+    }
+
+    fn restore_user_message_to_composer(&mut self, user_message: UserMessage) {
+        let UserMessage {
+            text,
+            local_images,
+            text_elements,
+            mention_paths: _mention_paths,
+            collaboration_mode_override,
+        } = user_message;
+        let local_image_paths = local_images.into_iter().map(|img| img.path).collect();
+        self.bottom_pane
+            .set_composer_text(text, text_elements, local_image_paths);
+        self.composer_collaboration_mode_override = collaboration_mode_override;
     }
 
     fn on_plan_update(&mut self, update: UpdatePlanArgs) {
@@ -2297,6 +2322,7 @@ impl ChatWidget {
             thread_name: None,
             forked_from: None,
             queued_user_messages: VecDeque::new(),
+            composer_collaboration_mode_override: None,
             show_welcome_banner: is_first_run,
             suppress_session_configured_redraw: false,
             pending_notification: None,
@@ -2446,6 +2472,7 @@ impl ChatWidget {
             plan_delta_buffer: String::new(),
             plan_item_active: false,
             queued_user_messages: VecDeque::new(),
+            composer_collaboration_mode_override: None,
             show_welcome_banner: is_first_run,
             suppress_session_configured_redraw: false,
             pending_notification: None,
@@ -2576,6 +2603,7 @@ impl ChatWidget {
             thread_name: None,
             forked_from: None,
             queued_user_messages: VecDeque::new(),
+            composer_collaboration_mode_override: None,
             show_welcome_banner: false,
             suppress_session_configured_redraw: true,
             pending_notification: None,
@@ -2696,16 +2724,7 @@ impl ChatWidget {
             } if !self.queued_user_messages.is_empty() => {
                 // Prefer the most recently queued item.
                 if let Some(user_message) = self.queued_user_messages.pop_back() {
-                    let local_image_paths = user_message
-                        .local_images
-                        .iter()
-                        .map(|img| img.path.clone())
-                        .collect();
-                    self.bottom_pane.set_composer_text(
-                        user_message.text,
-                        user_message.text_elements,
-                        local_image_paths,
-                    );
+                    self.restore_user_message_to_composer(user_message);
                     self.refresh_queued_user_messages();
                     self.request_redraw();
                 }
@@ -2722,7 +2741,8 @@ impl ChatWidget {
                             .take_recent_submission_images_with_placeholders(),
                         text_elements,
                         mention_paths: self.bottom_pane.take_mention_paths(),
-                        collaboration_mode_override: None,
+                        collaboration_mode_override: self
+                            .take_composer_collaboration_mode_override(),
                     };
                     if self.is_session_configured() && !self.is_plan_streaming_in_tui() {
                         // Submitted is only emitted when steer is enabled.
@@ -2746,7 +2766,8 @@ impl ChatWidget {
                             .take_recent_submission_images_with_placeholders(),
                         text_elements,
                         mention_paths: self.bottom_pane.take_mention_paths(),
-                        collaboration_mode_override: None,
+                        collaboration_mode_override: self
+                            .take_composer_collaboration_mode_override(),
                     };
                     self.queue_user_message(user_message);
                 }
@@ -2815,6 +2836,7 @@ impl ChatWidget {
                 cmd.command()
             );
             self.add_to_history(history_cell::new_error_event(message));
+            let _ = self.take_composer_collaboration_mode_override();
             self.bottom_pane.drain_pending_submission_state();
             self.request_redraw();
             return;
@@ -3089,6 +3111,7 @@ impl ChatWidget {
                 self.request_redraw();
                 self.app_event_tx
                     .send(AppEvent::CodexOp(Op::SetThreadName { name }));
+                let _ = self.take_composer_collaboration_mode_override();
                 self.bottom_pane.drain_pending_submission_state();
             }
             SlashCommand::Plan if !trimmed.is_empty() => {
@@ -3101,6 +3124,7 @@ impl ChatWidget {
                 else {
                     return;
                 };
+                let _ = self.take_composer_collaboration_mode_override();
                 let user_message = UserMessage {
                     text: prepared_args,
                     local_images: self
@@ -3133,6 +3157,7 @@ impl ChatWidget {
                         user_facing_hint: None,
                     },
                 });
+                let _ = self.take_composer_collaboration_mode_override();
                 self.bottom_pane.drain_pending_submission_state();
             }
             _ => self.dispatch_command(cmd),
@@ -5928,6 +5953,7 @@ impl ChatWidget {
         text_elements: Vec<TextElement>,
         local_image_paths: Vec<PathBuf>,
     ) {
+        self.composer_collaboration_mode_override = None;
         self.bottom_pane
             .set_composer_text(text, text_elements, local_image_paths);
     }

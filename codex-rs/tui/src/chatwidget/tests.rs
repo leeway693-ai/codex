@@ -465,6 +465,61 @@ async fn interrupted_turn_restores_queued_messages_with_images_and_elements() {
 }
 
 #[tokio::test]
+async fn interrupted_turn_restore_preserves_mode_override_for_resubmission() {
+    let (mut chat, _rx, mut op_rx) = make_chatwidget_manual(Some("gpt-5")).await;
+    chat.thread_id = Some(ThreadId::new());
+    chat.set_feature_enabled(Feature::CollaborationModes, true);
+
+    let plan_mask = collaboration_modes::plan_mask(chat.models_manager.as_ref())
+        .expect("expected plan collaboration mode");
+    let code_mask = collaboration_modes::code_mask(chat.models_manager.as_ref())
+        .expect("expected code collaboration mode");
+    let expected_mode = code_mask
+        .mode
+        .expect("expected mode kind on code collaboration mode");
+
+    chat.set_collaboration_mask(plan_mask);
+    chat.on_task_started();
+    chat.queued_user_messages.push_back(UserMessage {
+        text: "Implement the plan.".to_string(),
+        local_images: Vec::new(),
+        text_elements: Vec::new(),
+        mention_paths: HashMap::new(),
+        collaboration_mode_override: Some(code_mask.clone()),
+    });
+    chat.refresh_queued_user_messages();
+
+    chat.handle_codex_event(Event {
+        id: "interrupt".into(),
+        msg: EventMsg::TurnAborted(codex_core::protocol::TurnAbortedEvent {
+            reason: TurnAbortReason::Interrupted,
+        }),
+    });
+
+    assert_eq!(chat.bottom_pane.composer_text(), "Implement the plan.");
+    assert_eq!(
+        chat.composer_collaboration_mode_override,
+        Some(code_mask.clone())
+    );
+    assert!(chat.queued_user_messages.is_empty());
+    assert_eq!(chat.active_collaboration_mode_kind(), ModeKind::Plan);
+
+    chat.handle_key_event(KeyEvent::from(KeyCode::Enter));
+
+    match next_submit_op(&mut op_rx) {
+        Op::UserTurn {
+            collaboration_mode: Some(CollaborationMode { mode, .. }),
+            personality: None,
+            ..
+        } => assert_eq!(mode, expected_mode),
+        other => {
+            panic!("expected Op::UserTurn with restored mode override, got {other:?}")
+        }
+    }
+    assert_eq!(chat.active_collaboration_mode_kind(), expected_mode);
+}
+
+#[tokio::test]
 async fn remap_placeholders_uses_attachment_labels() {
     let placeholder_one = "[Image #1]";
     let placeholder_two = "[Image #2]";
@@ -880,6 +935,7 @@ async fn make_chatwidget_manual(
         frame_requester: FrameRequester::test_dummy(),
         show_welcome_banner: true,
         queued_user_messages: VecDeque::new(),
+        composer_collaboration_mode_override: None,
         suppress_session_configured_redraw: false,
         pending_notification: None,
         quit_shortcut_expires_at: None,
