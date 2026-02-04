@@ -168,6 +168,7 @@ pub(crate) struct UserHistoryCell {
     pub text_elements: Vec<TextElement>,
     #[allow(dead_code)]
     pub local_image_paths: Vec<PathBuf>,
+    pub remote_image_urls: Vec<String>,
 }
 
 /// Build logical lines for a user message with styled text elements.
@@ -249,30 +250,50 @@ impl HistoryCell for UserHistoryCell {
         let style = user_message_style();
         let element_style = style.fg(Color::Cyan);
 
-        let wrapped = if self.text_elements.is_empty() {
-            word_wrap_lines(
-                self.message.split('\n').map(|l| Line::from(l).style(style)),
-                // Wrap algorithm matches textarea.rs.
+        if !self.remote_image_urls.is_empty() {
+            let wrapped_remote_images = word_wrap_lines(
+                self.remote_image_urls.iter().map(|url| {
+                    Line::from(vec!["[image url] ".dim(), url.clone().cyan().underlined()])
+                }),
                 RtOptions::new(usize::from(wrap_width))
                     .wrap_algorithm(textwrap::WrapAlgorithm::FirstFit),
-            )
-        } else {
-            let raw_lines = build_user_message_lines_with_elements(
-                &self.message,
-                &self.text_elements,
-                style,
-                element_style,
             );
-            word_wrap_lines(
-                raw_lines,
-                RtOptions::new(usize::from(wrap_width))
-                    .wrap_algorithm(textwrap::WrapAlgorithm::FirstFit),
-            )
-        };
+            lines.push(Line::from("").style(style));
+            lines.extend(prefix_lines(
+                wrapped_remote_images,
+                "  ".into(),
+                "  ".into(),
+            ));
+        }
 
-        lines.push(Line::from("").style(style));
-        lines.extend(prefix_lines(wrapped, "› ".bold().dim(), "  ".into()));
-        lines.push(Line::from("").style(style));
+        if !self.message.is_empty() || !self.text_elements.is_empty() {
+            let wrapped = if self.text_elements.is_empty() {
+                word_wrap_lines(
+                    self.message.split('\n').map(|l| Line::from(l).style(style)),
+                    // Wrap algorithm matches textarea.rs.
+                    RtOptions::new(usize::from(wrap_width))
+                        .wrap_algorithm(textwrap::WrapAlgorithm::FirstFit),
+                )
+            } else {
+                let raw_lines = build_user_message_lines_with_elements(
+                    &self.message,
+                    &self.text_elements,
+                    style,
+                    element_style,
+                );
+                word_wrap_lines(
+                    raw_lines,
+                    RtOptions::new(usize::from(wrap_width))
+                        .wrap_algorithm(textwrap::WrapAlgorithm::FirstFit),
+                )
+            };
+
+            lines.push(Line::from("").style(style));
+            lines.extend(prefix_lines(wrapped, "› ".bold().dim(), "  ".into()));
+        }
+        if !lines.is_empty() {
+            lines.push(Line::from("").style(style));
+        }
         lines
     }
 }
@@ -1018,11 +1039,13 @@ pub(crate) fn new_user_prompt(
     message: String,
     text_elements: Vec<TextElement>,
     local_image_paths: Vec<PathBuf>,
+    remote_image_urls: Vec<String>,
 ) -> UserHistoryCell {
     UserHistoryCell {
         message,
         text_elements,
         local_image_paths,
+        remote_image_urls,
     }
 }
 
@@ -3323,6 +3346,7 @@ mod tests {
             message: msg.to_string(),
             text_elements: Vec::new(),
             local_image_paths: Vec::new(),
+            remote_image_urls: Vec::new(),
         };
 
         // Small width to force wrapping more clearly. Effective wrap width is width-2 due to the ▌ prefix and trailing space.
@@ -3331,6 +3355,22 @@ mod tests {
         let rendered = render_lines(&lines).join("\n");
 
         insta::assert_snapshot!(rendered);
+    }
+
+    #[test]
+    fn user_history_cell_renders_remote_image_urls() {
+        let cell = UserHistoryCell {
+            message: "describe these".to_string(),
+            text_elements: Vec::new(),
+            local_image_paths: Vec::new(),
+            remote_image_urls: vec!["https://example.com/example.png".to_string()],
+        };
+
+        let rendered = render_lines(&cell.display_lines(80)).join("\n");
+
+        assert!(rendered.contains("[image url]"));
+        assert!(rendered.contains("https://example.com/example.png"));
+        assert!(rendered.contains("describe these"));
     }
 
     #[test]

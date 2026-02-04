@@ -2899,12 +2899,14 @@ mod tests {
 
         let user_cell = |text: &str,
                          text_elements: Vec<TextElement>,
-                         local_image_paths: Vec<PathBuf>|
+                         local_image_paths: Vec<PathBuf>,
+                         remote_image_urls: Vec<String>|
          -> Arc<dyn HistoryCell> {
             Arc::new(UserHistoryCell {
                 message: text.to_string(),
                 text_elements,
                 local_image_paths,
+                remote_image_urls,
             }) as Arc<dyn HistoryCell>
         };
         let agent_cell = |text: &str| -> Arc<dyn HistoryCell> {
@@ -2949,17 +2951,18 @@ mod tests {
         // and an edited turn appended after a session header boundary.
         app.transcript_cells = vec![
             make_header(true),
-            user_cell("first question", Vec::new(), Vec::new()),
+            user_cell("first question", Vec::new(), Vec::new(), Vec::new()),
             agent_cell("answer first"),
-            user_cell("follow-up", Vec::new(), Vec::new()),
+            user_cell("follow-up", Vec::new(), Vec::new(), Vec::new()),
             agent_cell("answer follow-up"),
             make_header(false),
-            user_cell("first question", Vec::new(), Vec::new()),
+            user_cell("first question", Vec::new(), Vec::new(), Vec::new()),
             agent_cell("answer first"),
             user_cell(
                 &edited_text,
                 edited_text_elements.clone(),
                 edited_local_image_paths.clone(),
+                vec!["https://example.com/backtrack.png".to_string()],
             ),
             agent_cell("answer edited"),
         ];
@@ -2997,8 +3000,16 @@ mod tests {
         assert_eq!(selection.prefill, edited_text);
         assert_eq!(selection.text_elements, edited_text_elements);
         assert_eq!(selection.local_image_paths, edited_local_image_paths);
+        assert_eq!(
+            selection.remote_image_urls,
+            vec!["https://example.com/backtrack.png".to_string()]
+        );
 
         app.apply_backtrack_rollback(selection);
+        assert_eq!(
+            app.chat_widget.pending_non_editable_image_urls(),
+            vec!["https://example.com/backtrack.png".to_string()]
+        );
 
         let mut rollback_turns = None;
         while let Ok(op) = op_rx.try_recv() {
