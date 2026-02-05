@@ -16,6 +16,7 @@ mod tests;
 use crate::config::CONFIG_TOML_FILE;
 use crate::config::ConfigToml;
 use crate::config::deserialize_config_toml_with_base;
+use crate::config::types::FeedbackConfigToml;
 use crate::config_loader::config_requirements::ConfigRequirementsWithSources;
 use crate::config_loader::layer_io::LoadedConfigLayers;
 use crate::git_info::resolve_root_git_project_for_trust;
@@ -792,6 +793,7 @@ async fn load_project_layers(
 struct LegacyManagedConfigToml {
     approval_policy: Option<AskForApproval>,
     sandbox_mode: Option<SandboxMode>,
+    feedback: Option<FeedbackConfigToml>,
 }
 
 impl From<LegacyManagedConfigToml> for ConfigRequirementsToml {
@@ -801,6 +803,7 @@ impl From<LegacyManagedConfigToml> for ConfigRequirementsToml {
         let LegacyManagedConfigToml {
             approval_policy,
             sandbox_mode,
+            feedback,
         } = legacy;
         if let Some(approval_policy) = approval_policy {
             config_requirements_toml.allowed_approval_policies = Some(vec![approval_policy]);
@@ -814,6 +817,9 @@ impl From<LegacyManagedConfigToml> for ConfigRequirementsToml {
                 allowed_modes.push(required_mode);
             }
             config_requirements_toml.allowed_sandbox_modes = Some(allowed_modes);
+        }
+        if let Some(feedback_enabled) = feedback.and_then(|feedback| feedback.enabled) {
+            config_requirements_toml.feedback_enabled = Some(feedback_enabled);
         }
         config_requirements_toml
     }
@@ -867,6 +873,7 @@ foo = "xyzzy"
         let legacy = LegacyManagedConfigToml {
             approval_policy: None,
             sandbox_mode: Some(SandboxMode::WorkspaceWrite),
+            feedback: None,
         };
 
         let requirements = ConfigRequirementsToml::from(legacy);
@@ -878,5 +885,20 @@ foo = "xyzzy"
                 SandboxModeRequirement::WorkspaceWrite
             ])
         );
+    }
+
+    #[test]
+    fn legacy_managed_config_backfill_includes_feedback_enabled() {
+        let legacy = LegacyManagedConfigToml {
+            approval_policy: None,
+            sandbox_mode: None,
+            feedback: Some(FeedbackConfigToml {
+                enabled: Some(false),
+            }),
+        };
+
+        let requirements = ConfigRequirementsToml::from(legacy);
+
+        assert_eq!(requirements.feedback_enabled, Some(false));
     }
 }
