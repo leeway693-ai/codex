@@ -2,6 +2,7 @@ use async_trait::async_trait;
 use bm25::Document;
 use bm25::Language;
 use bm25::SearchEngineBuilder;
+use codex_protocol::models::FunctionCallOutputBody;
 use serde::Deserialize;
 use serde_json::Value as JsonValue;
 use serde_json::json;
@@ -114,17 +115,16 @@ impl ToolHandler for SearchToolBm25Handler {
         entries.sort_by(|a, b| a.name.cmp(&b.name));
 
         if entries.is_empty() {
-            session.set_next_mcp_tool_selection(Vec::new()).await;
+            let active_selected_tools = session.get_mcp_tool_selection().await.unwrap_or_default();
             let content = json!({
                 "query": query,
                 "total_tools": 0,
-                "selected_tools": [],
+                "active_selected_tools": active_selected_tools,
                 "tools": [],
             })
             .to_string();
             return Ok(ToolOutput::Function {
-                content,
-                content_items: None,
+                body: FunctionCallOutputBody::Text(content),
                 success: Some(false),
             });
         }
@@ -157,21 +157,18 @@ impl ToolHandler for SearchToolBm25Handler {
             }));
         }
 
-        session
-            .set_next_mcp_tool_selection(selected_tools.clone())
-            .await;
+        let active_selected_tools = session.merge_mcp_tool_selection(selected_tools).await;
 
         let content = json!({
             "query": query,
             "total_tools": entries.len(),
-            "selected_tools": selected_tools,
+            "active_selected_tools": active_selected_tools,
             "tools": result_payloads,
         })
         .to_string();
 
         Ok(ToolOutput::Function {
-            content,
-            content_items: None,
+            body: FunctionCallOutputBody::Text(content),
             success: Some(!result_payloads.is_empty()),
         })
     }
